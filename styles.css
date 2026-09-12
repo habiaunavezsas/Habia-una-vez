@@ -2657,6 +2657,10 @@ select:focus-visible {
 }
 
 @media (max-width: 640px) {
+  .story-grid {
+    grid-template-columns: 1fr;
+  }
+
   .topbar-add-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2699,6 +2703,11 @@ select:focus-visible {
 
   .section-header p {
     font-size: 0.9rem;
+  }
+
+  .section-header {
+    gap: 10px;
+    margin-bottom: 14px;
   }
 
   .modal-card {
