@@ -207,12 +207,23 @@ function createStoryQuiz(title, paragraphs) {
 
 let stories = [];
 const storedStoryVideos = JSON.parse(localStorage.getItem('habia-vez-story-videos') || '{}');
+const storedCustomStories = JSON.parse(localStorage.getItem('habia-vez-custom-stories') || '[]');
+let remoteStoryVideos = {};
 
 function getStoryCategories(story) {
   return story.categories || String(story.category || '').split(',').map((category) => category.trim()).filter(Boolean);
 }
 
 async function loadStoriesFromFiles() {
+  if (supabaseClient) {
+    const { data, error } = await supabaseClient
+      .from('story_videos')
+      .select('story_id, title, src, description, custom');
+    if (!error && data) {
+      remoteStoryVideos = Object.fromEntries(data.map((video) => [video.story_id, video]));
+    }
+  }
+
   const loadedStories = await Promise.all(
     storyFiles.map(async (fileName) => {
       const response = await fetch(`assets/cuentos/${fileName}`);
@@ -270,12 +281,17 @@ async function loadStoriesFromFiles() {
         cover,
         pages: paragraphs.map((text, index) => ({ title: `Página ${index + 1}`, text, image: cover })),
         quiz: createStoryQuiz(title, paragraphs),
-        video: storedStoryVideos[fileName.replace('.md', '')] || { title, src: '', description: `Video de ${title}.` },
+        video: remoteStoryVideos[fileName.replace('.md', '')]
+          || storedStoryVideos[fileName.replace('.md', '')]
+          || { title, src: '', description: `Video de ${title}.` },
       };
     })
   );
 
-  stories = loadedStories;
+  stories = [...loadedStories, ...storedCustomStories].map((story) => ({
+    ...story,
+    video: remoteStoryVideos[story.id] || story.video,
+  }));
 }
 
 const values = [];
@@ -466,9 +482,20 @@ function saveCustomStories() {
   );
 }
 
-function saveStoryVideos() {
+async function saveStoryVideos() {
   const storyVideos = Object.fromEntries(stories.filter((story) => story.video?.src).map((story) => [story.id, story.video]));
   localStorage.setItem('habia-vez-story-videos', JSON.stringify(storyVideos));
+  if (!supabaseClient) return;
+
+  const videos = Object.entries(storyVideos).map(([storyId, video]) => ({
+    story_id: storyId,
+    title: video.title,
+    src: video.src,
+    description: video.description,
+    custom: Boolean(video.custom),
+  }));
+  const { error } = await supabaseClient.from('story_videos').upsert(videos, { onConflict: 'story_id' });
+  if (error) showToast(`No se pudo guardar el video en la base de datos: ${error.message}`);
 }
 
 function renderDeleteVideosMenu() {
@@ -485,6 +512,7 @@ function deleteVideo(storyId) {
   if (!story || !window.confirm(`¿Eliminar el video de "${story.title}"?`)) return;
   story.video = { title: story.title, src: '', description: `Video de ${story.title}.` };
   saveStoryVideos();
+  supabaseClient?.from('story_videos').delete().eq('story_id', storyId);
   saveCustomStories();
   renderVideos();
   renderDeleteVideosMenu();
@@ -1976,6 +2004,7 @@ function setupAuthentication() {
     if (authStatus) authStatus.textContent = user
       ? `Sesión iniciada como ${user.email}${state.isAdmin ? ' · Administrador' : ''}`
       : '';
+    if (state.isAdmin) saveStoryVideos();
     renderStories();
     renderVideos();
     renderCharacters();
