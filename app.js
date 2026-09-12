@@ -2403,7 +2403,23 @@ async function setupAuthentication() {
   const googleLoginButton = document.getElementById('googleLoginBtn');
   const authDivider = document.querySelector('.auth-divider');
   let authMode = 'login';
-  const authRedirectUrl = `${window.location.origin}${window.location.pathname}`;
+  const authRedirectUrl = supabaseConfig.redirectUrl || supabaseConfig.authRedirectUrl || `${window.location.origin}${window.location.pathname}`;
+
+  const getRedirectHint = () => {
+    const currentOrigin = window.location.origin;
+    const currentPath = window.location.pathname;
+    const fallbackOrigins = [
+      'http://localhost:8000',
+      'http://127.0.0.1:8000',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      currentOrigin,
+    ];
+
+    const uniqOrigins = [...new Set(fallbackOrigins.filter(Boolean))];
+    const allowed = uniqOrigins.map((origin) => `${origin}${currentPath}`).join(', ');
+    return `Revisa en Supabase Auth que la URL de redirección esté permitida: ${allowed}`;
+  };
 
   const updateAuthUi = (session) => {
     const user = session?.user;
@@ -2498,7 +2514,7 @@ async function setupAuthentication() {
     }
     updateAuthUi(data.session);
     if (!data.session) {
-      if (authStatus) authStatus.textContent = 'No hay sesión activa. Revisa Auth de Supabase y la URL local (http://localhost).';
+      if (authStatus) authStatus.textContent = `No hay sesión activa. ${getRedirectHint()}`;
       return;
     }
     const { data: userData, error: userError } = await supabaseClient.auth.getUser();
