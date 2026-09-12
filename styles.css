@@ -1247,6 +1247,14 @@ main {
   display: flex;
   justify-content: center;
   align-items: center;
+  width: 100%;
+}
+
+.audio-controls button {
+  width: min(220px, calc(100% - 24px));
+  min-width: 0;
+  max-width: 220px;
+  white-space: nowrap;
 }
 
 .audio-modal-cover {
@@ -2184,6 +2192,19 @@ main {
     gap: 16px;
   }
 
+  .home-menu-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .home-menu-btn {
+    width: min(100%, 320px);
+    margin: 0 auto;
+    justify-items: center;
+    text-align: center;
+    min-height: 76px;
+  }
+
   .video-grid,
   .audio-grid,
   .activity-grid,
@@ -2271,7 +2292,18 @@ main {
     grid-template-columns: 1fr 1fr;
   }
 
-  .audio-controls button,
+  .audio-controls {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .audio-controls button {
+    width: min(220px, calc(100% - 18px));
+    min-width: 0;
+    max-width: 220px;
+  }
+
   .video-controls-inline button,
   .color-tools > button,
   .activity-footer button {
