@@ -261,8 +261,6 @@ async function upsertUserProfile() {
 
   const payload = {
     user_id: userId,
-    favorites: state.favorites,
-    progress: state.progress,
     purchases: state.purchases,
     custom_stories: stories.filter((story) => story.custom),
     custom_characters: characters.filter((character) => character.custom),
@@ -276,12 +274,36 @@ async function upsertUserProfile() {
 }
 
 let profileSaveQueue = Promise.resolve();
+let librarySaveQueue = Promise.resolve();
 
 function queueUserProfileSave() {
   if (!supabaseClient) return;
   profileSaveQueue = profileSaveQueue
     .catch(() => {})
     .then(() => upsertUserProfile());
+}
+
+async function upsertLibraryProgress() {
+  if (!supabaseClient) return;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const { error } = await supabaseClient.from('user_library_progress').upsert({
+    user_id: userId,
+    favorites: state.favorites,
+    progress: state.progress,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'user_id' });
+  if (error) {
+    console.error('No se pudo guardar favoritos y logros:', error);
+  }
+}
+
+function queueLibraryProgressSave() {
+  if (!supabaseClient) return;
+  librarySaveQueue = librarySaveQueue
+    .catch(() => {})
+    .then(() => upsertLibraryProgress());
 }
 
 function mergeProgress(remoteProgress, localProgress) {
@@ -316,19 +338,36 @@ async function loadUserProfile() {
     return;
   }
 
-  if (!data) return;
+  const legacyFavorites = Array.isArray(data?.favorites) ? data.favorites : [];
+  const legacyProgress = data?.progress && typeof data.progress === 'object' ? data.progress : {};
 
-  const remoteFavorites = Array.isArray(data.favorites) ? data.favorites : [];
-  const remoteProgress = data.progress && typeof data.progress === 'object' ? data.progress : {};
-  state.favorites = [...new Set([...remoteFavorites, ...state.favorites])];
-  state.progress = mergeProgress(remoteProgress, state.progress || {});
-  state.purchases = Array.isArray(data.purchases) ? data.purchases : [];
+  const { data: libraryData, error: libraryError } = await supabaseClient
+    .from('user_library_progress')
+    .select('favorites, progress')
+    .eq('user_id', userId)
+    .maybeSingle();
 
-  const customStories = Array.isArray(data.custom_stories) ? data.custom_stories : [];
-  const customCharacters = Array.isArray(data.custom_characters) ? data.custom_characters : [];
+  if (libraryError) {
+    console.error('No se pudo cargar la tabla de favoritos y logros:', libraryError);
+    state.favorites = [...new Set([...legacyFavorites, ...state.favorites])];
+    state.progress = mergeProgress(legacyProgress, state.progress || {});
+  } else if (libraryData) {
+    state.favorites = [...new Set([...(Array.isArray(libraryData.favorites) ? libraryData.favorites : []), ...state.favorites])];
+    state.progress = mergeProgress(libraryData.progress || {}, state.progress || {});
+  } else {
+    state.favorites = [...new Set([...legacyFavorites, ...state.favorites])];
+    state.progress = mergeProgress(legacyProgress, state.progress || {});
+    await upsertLibraryProgress();
+  }
+
+  if (data) state.purchases = Array.isArray(data.purchases) ? data.purchases : [];
+
+  const customStories = Array.isArray(data?.custom_stories) ? data.custom_stories : [];
+  const customCharacters = Array.isArray(data?.custom_characters) ? data.custom_characters : [];
 
   stories = [...stories.filter((story) => !story.custom), ...customStories];
   characters = [...defaultCharacters, ...customCharacters];
+  queueLibraryProgressSave();
   queueUserProfileSave();
 }
 
@@ -646,6 +685,7 @@ function saveState() {
     console.warn('No se pudo guardar el progreso local:', error);
   }
 
+  queueLibraryProgressSave();
   queueUserProfileSave();
 }
 
@@ -1359,6 +1399,12 @@ function updateReaderDisplay() {
   nextBtn.textContent = state.currentReaderIndex === story.pages.length - 1 ? 'Final ➡️' : 'Siguiente ➡️';
 }
 
+function updateReaderHighlight() {
+  document.querySelectorAll('#readerPage .reader-word').forEach((word) => {
+    word.classList.toggle('is-speaking', Number(word.dataset.wordIndex) === state.activeAudioWord);
+  });
+}
+
 function openAudio(storyId) {
   const story = stories.find((item) => item.id === storyId);
   if (!story) return;
@@ -1436,14 +1482,16 @@ function speakReaderPage(pageIndex, sessionId) {
   utterance.pitch = 1.2;
   utterance.volume = Number(document.getElementById('audioVolume').value);
 
-  let receivedBoundary = false;
   let fallbackWord = 0;
+  let lastBoundaryAt = 0;
   const wordDelay = Math.max(180, 60000 / Math.max(60, state.audioRate * 150));
   state.audioHighlightTimer = window.setInterval(() => {
-    if (receivedBoundary || sessionId !== state.audioSession) return;
+    if (sessionId !== state.audioSession || (lastBoundaryAt && Date.now() - lastBoundaryAt < wordDelay * 1.35)) return;
     fallbackWord = Math.min(fallbackWord + 1, Math.max(0, words.length - 1));
-    state.activeAudioWord = fallbackWord;
-    updateReaderDisplay();
+    if (state.activeAudioWord !== fallbackWord) {
+      state.activeAudioWord = fallbackWord;
+      updateReaderHighlight();
+    }
   }, wordDelay);
 
   utterance.onstart = () => {
@@ -1451,10 +1499,13 @@ function speakReaderPage(pageIndex, sessionId) {
   };
   utterance.onboundary = (event) => {
     if (sessionId !== state.audioSession || typeof event.charIndex !== 'number') return;
-    receivedBoundary = true;
     const activeWord = pageText.slice(0, event.charIndex).trim().split(/\s+/).filter(Boolean).length;
-    state.activeAudioWord = Math.min(activeWord, Math.max(0, words.length - 1));
-    updateReaderDisplay();
+    fallbackWord = Math.min(activeWord, Math.max(0, words.length - 1));
+    lastBoundaryAt = Date.now();
+    if (state.activeAudioWord !== fallbackWord) {
+      state.activeAudioWord = fallbackWord;
+      updateReaderHighlight();
+    }
   };
   utterance.onend = () => {
     clearAudioHighlightTimer();

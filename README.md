@@ -45,7 +45,9 @@ También puedes usar la extensión **Live Server** de VS Code.
 
 Sin iniciar sesión, favoritos, progreso y compras se guardan en el navegador mediante `localStorage`.
 
-Con Supabase configurado y una sesión iniciada, esos datos también se sincronizan con la tabla `user_data`. La configuración pública del cliente se encuentra en `supabase-config.js`; las políticas de seguridad de la base de datos deben configurarse en el proyecto de Supabase.
+Con Supabase configurado y una sesión iniciada, compras y contenido personalizado se guardan en `user_data`. Los favoritos y los logros/progreso se guardan en la tabla dedicada `user_library_progress`, para que estén disponibles en cualquier dispositivo con la misma cuenta.
+
+Para crear la tabla y sus políticas de seguridad, ejecuta una vez el archivo `supabase-library-progress.sql` completo en el SQL Editor de Supabase. La aplicación migra automáticamente los favoritos y el progreso antiguos de `user_data` sin reemplazar una fila que ya exista en la tabla nueva.
 
 ## Añadir cuentos
 

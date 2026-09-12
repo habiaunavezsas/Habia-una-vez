@@ -1,4 +1,4 @@
-const CACHE_NAME = 'habia-vez-v1';
+const CACHE_NAME = 'habia-vez-v2';
 const APP_SHELL = [
   './',
   './index.html',

@@ -821,7 +821,7 @@ main {
 }
 
 .story-grid {
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: stretch;
 }
 
@@ -862,7 +862,8 @@ main {
   min-height: 430px;
   display: flex;
   flex-direction: column;
-  text-align: center;
+  text-align: left;
+  height: 100%;
 }
 
 .story-card:hover {
@@ -995,6 +996,7 @@ main {
   flex: 1;
   flex-direction: column;
   align-items: stretch;
+  justify-content: flex-start;
 }
 
 .story-topline,
@@ -1008,6 +1010,10 @@ main {
 
 .story-topline {
   margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
 }
 
 .story-title {
@@ -1016,14 +1022,14 @@ main {
   min-height: 56px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  text-align: center;
+  justify-content: flex-start;
+  text-align: left;
   width: 100%;
 }
 
 .story-card .story-title {
   width: 100%;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .story-fav {
@@ -1032,6 +1038,7 @@ main {
   border-radius: 50%;
   background: rgba(255, 215, 107, 0.18);
   font-size: 1.2rem;
+  flex-shrink: 0;
 }
 
 .story-fav.is-active {
@@ -1042,12 +1049,12 @@ main {
   margin: 10px 0 12px;
   color: rgba(57, 42, 83, 0.8);
   line-height: 1.55;
-  min-height: 70px;
+  min-height: 108px;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  text-align: center;
+  -webkit-line-clamp: 4;
+  text-align: left;
 }
 
 .story-meta {
@@ -1059,25 +1066,33 @@ main {
   padding: 6px 10px;
   font-size: 0.76rem;
   font-weight: 700;
+  min-height: 36px;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 100%;
 }
 
 .meta-row {
   margin: 8px 0 12px;
   padding: 0;
-  flex-wrap: wrap;
-  justify-content: center;
-  min-height: 38px;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  justify-content: stretch;
+  min-height: 80px;
+  align-content: start;
   width: 100%;
 }
 
 .story-actions {
-  justify-content: center;
-  flex-wrap: wrap;
+  justify-content: stretch;
+  flex-wrap: nowrap;
   gap: 8px;
-  margin-top: 0;
+  margin-top: auto;
   width: 100%;
-  align-items: center;
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
 }
 
 .story-actions .card-action,
@@ -1085,15 +1100,23 @@ main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .card-action {
   padding: 9px 12px;
   font-size: 0.82rem;
   flex: 1 1 90px;
-  align-self: center;
-  min-width: 150px;
+  align-self: stretch;
+  min-width: 0;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.story-actions .card-action {
+  min-height: 46px;
 }
 
 .video-card,
@@ -1104,6 +1127,12 @@ main {
 .value-card,
 .achievement-card {
   padding: 16px;
+}
+
+.video-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 .audio-tile {
@@ -1137,6 +1166,48 @@ main {
   background-size: cover;
   background-position: center;
   margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.video-card h3 {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  margin: 0 0 8px;
+}
+
+.video-card p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  line-height: 1.55;
+  min-height: 90px;
+}
+
+.video-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.video-meta .mini-badge {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.video-card .video-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.video-btn {
+  width: 100%;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .audio-cover {
@@ -1455,6 +1526,10 @@ main {
   border-radius: 4px;
   background: rgba(241, 173, 98, 0.45);
   box-shadow: 0 2px 0 rgba(226, 118, 93, 0.25);
+}
+
+.reader-word {
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .reader-page-image {
@@ -2104,7 +2179,11 @@ main {
     border-radius: 22px;
   }
 
-  .story-grid,
+  .story-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
   .video-grid,
   .audio-grid,
   .activity-grid,
@@ -2447,6 +2526,8 @@ h4,
   background: rgba(105, 185, 187, 0.11);
   border: 1px solid rgba(23, 59, 67, 0.1);
   color: var(--navy);
+  line-height: 1.2;
+  text-align: center;
 }
 
 .card-action:hover,
@@ -2532,6 +2613,10 @@ select:focus-visible {
 
   .nav-links {
     justify-content: flex-start;
+  }
+
+  .story-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .home-menu-grid {
