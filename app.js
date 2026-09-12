@@ -206,9 +206,103 @@ function createStoryQuiz(title, paragraphs) {
 }
 
 let stories = [];
-const storedStoryVideos = JSON.parse(localStorage.getItem('habia-vez-story-videos') || '{}');
-const storedCustomStories = JSON.parse(localStorage.getItem('habia-vez-custom-stories') || '[]');
+let storedStoryVideos = {};
+let storedCustomStories = [];
 let remoteStoryVideos = {};
+
+async function getCurrentUserId() {
+  if (!supabaseClient?.auth?.getUser) return null;
+  const { data, error } = await supabaseClient.auth.getUser();
+  if (error || !data?.user) return null;
+  return data.user.id;
+}
+
+async function ensureUserProfile() {
+  if (!supabaseClient) return null;
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+
+  const { data: existingProfile, error: lookupError } = await supabaseClient
+    .from('user_data')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (lookupError && lookupError.code !== 'PGRST116') {
+    console.error('No se pudo comprobar el perfil del usuario:', lookupError);
+    return null;
+  }
+
+  if (!existingProfile) {
+    const { error: insertError } = await supabaseClient
+      .from('user_data')
+      .insert({
+        user_id: userId,
+        favorites: [],
+        progress: {},
+        purchases: [],
+        custom_stories: [],
+        custom_characters: [],
+      });
+
+    if (insertError && insertError.code !== '23505') {
+      console.error('No se pudo crear el perfil del usuario:', insertError);
+      return null;
+    }
+  }
+
+  return userId;
+}
+
+async function upsertUserProfile() {
+  if (!supabaseClient) return;
+  const userId = await ensureUserProfile();
+  if (!userId) return;
+
+  const payload = {
+    user_id: userId,
+    favorites: state.favorites,
+    progress: state.progress,
+    purchases: state.purchases,
+    custom_stories: stories.filter((story) => story.custom),
+    custom_characters: characters.filter((character) => character.custom),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabaseClient.from('user_data').upsert(payload, { onConflict: 'user_id' });
+  if (error) {
+    console.error('No se pudo guardar la información del usuario en la base de datos:', error);
+  }
+}
+
+async function loadUserProfile() {
+  if (!supabaseClient) return;
+  const userId = await ensureUserProfile();
+  if (!userId) return;
+
+  const { data, error } = await supabaseClient
+    .from('user_data')
+    .select('favorites, progress, purchases, custom_stories, custom_characters')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('No se pudo cargar la información del usuario desde la base de datos:', error);
+    return;
+  }
+
+  if (!data) return;
+
+  state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
+  state.progress = data.progress && typeof data.progress === 'object' ? data.progress : {};
+  state.purchases = Array.isArray(data.purchases) ? data.purchases : [];
+
+  const customStories = Array.isArray(data.custom_stories) ? data.custom_stories : [];
+  const customCharacters = Array.isArray(data.custom_characters) ? data.custom_characters : [];
+
+  stories = [...stories.filter((story) => !story.custom), ...customStories];
+  characters = [...defaultCharacters, ...customCharacters];
+}
 
 function getStoryCategories(story) {
   return story.categories || String(story.category || '').split(',').map((category) => category.trim()).filter(Boolean);
@@ -288,13 +382,38 @@ async function loadStoriesFromFiles() {
     })
   );
 
-  stories = [...loadedStories, ...storedCustomStories].map((story) => ({
+  stories = [...loadedStories].map((story) => ({
     ...story,
     video: remoteStoryVideos[story.id] || story.video,
   }));
+
+  await loadUserProfile();
 }
 
 const values = [];
+
+const shopItems = [
+  { id: 'forest-theme', name: '🌲 Fondo del bosque mágico', description: 'Un paisaje encantado para tu biblioteca.', price: 80, emoji: '🌲', category: 'Visuales' },
+  { id: 'star-theme', name: '✨ Fondo estrellado', description: 'Un cielo lleno de magia para soñar.', price: 90, emoji: '✨', category: 'Visuales' },
+  { id: 'garden-theme', name: '🌼 Jardín de hadas', description: 'Un rincón dulce y luminoso para tus cuentos.', price: 100, emoji: '🌼', category: 'Visuales' },
+  { id: 'bear-avatar', name: '🐻 Avatar de osito lector', description: 'Un compañero amable para tu perfil.', price: 60, emoji: '🐻', category: 'Personajes' },
+  { id: 'fox-avatar', name: '🦊 Avatar de zorro curioso', description: 'Si te gusta explorar historias nuevas.', price: 70, emoji: '🦊', category: 'Personajes' },
+  { id: 'star-pack', name: '⭐ Pack de estrellas', description: 'Pegatinas brillantes para tus logros.', price: 40, emoji: '⭐', category: 'Stickers' },
+  { id: 'heart-pack', name: '💖 Pack de corazones', description: 'Un toque de cariño y alegría.', price: 45, emoji: '💖', category: 'Stickers' },
+  { id: 'story-bonus', name: '📖 Cuento sorpresa extra', description: 'Desbloquea una historia especial.', price: 150, emoji: '📖', category: 'Extras' },
+  { id: 'audio-bonus', name: '🎧 Audio especial', description: 'Un audio mágico para escuchar otra vez.', price: 120, emoji: '🎧', category: 'Extras' },
+  { id: 'drawing-kit', name: '🎨 Kit de dibujo', description: 'Acceso a un conjunto extra de colores.', price: 90, emoji: '🎨', category: 'Extras' },
+];
+
+function getCurrentPoints() {
+  const progress = state.progress || {};
+  const readStories = Number(progress.readStories || 0);
+  const listened = Number(progress.listened || 0);
+  const watched = Number(progress.watched || 0);
+  const activities = Number(progress.activities || 0);
+  const colored = Number(progress.colored || 0);
+  return readStories * 25 + listened * 15 + watched * 20 + activities * 30 + colored * 20;
+}
 
 const defaultCharacters = [
   { name: 'Caperucita Roja', emoji: '🧺', story: 'Caperucita Roja', description: 'Una niña cariñosa que aprende a cuidar sus pasos y escuchar los consejos de su familia.', value: 'Prudencia', traits: ['Curiosa', 'Cariñosa', 'Valiente'], image: '' },
@@ -342,9 +461,6 @@ const defaultCharacters = [
 
 let characters = [...defaultCharacters];
 
-const storedCharacters = JSON.parse(localStorage.getItem('habia-vez-custom-characters') || '[]');
-characters = [...characters, ...storedCharacters];
-
 const coloringScenes = [
   { id: 'bosque-estrellas', title: 'El bosque de las estrellas perdidas', image: 'assets/colorear/El Bosque de las Estrellas Perdidas.avif' },
   { id: 'bella-durmiente-mandala', title: 'La bella durmiente', image: 'assets/colorear/La Bella Durmiente.jpg' },
@@ -357,15 +473,20 @@ const coloringScenes = [
 ];
 
 const mainPaletteColors = [
-  '#000000', '#555555', '#ffffff', '#6d2c00', '#a84400',
-  '#d50000', '#ff1744', '#ff5252', '#ff6d00', '#ff9100',
-  '#ffc400', '#ffd600', '#76ff03', '#aeea00', '#00c853',
-  '#00e676', '#00a152', '#00bfa5', '#00e5ff', '#18ffff',
-  '#0091ea', '#00b0ff', '#0057b8', '#2979ff', '#304ffe',
-  '#3d5afe', '#6200ea', '#651fff', '#aa00ff', '#e040fb',
-  '#d500f9', '#c51162', '#f50057', '#ff4081', '#ff80ab',
-  '#8d5524', '#b5651d', '#d2691e', '#795548', '#3e2723'
+  '#000000', '#333333', '#666666', '#999999', '#CCCCCC', '#FFFFFF', '#800000', '#B00020', '#FF0000', '#FF5252',
+  '#FF8080', '#E91E63', '#FF4081', '#FF80AB', '#F4C2C2', '#6D071A', '#C2185B', '#FF6F61', '#FA8072', '#FFAB91',
+  '#7A2E00', '#B87333', '#D2691E', '#FF7500', '#FF9800', '#FFB347', '#FFD0A6', '#806600', '#D4A017', '#FFC107',
+  '#FFD600', '#FFFF00', '#FFF176', '#FFF4B0', '#123D20', '#006B2E', '#008844', '#00B84D', '#00E676', '#66BB6A',
+  '#9CCC65', '#D4E157', '#568203', '#01796F', '#00A86B', '#046307', '#00FF7F', '#39FF14', '#7FFFD4', '#66CDAA',
+  '#00BFA5', '#40E0D0', '#00FFFF', '#80DEEA', '#006D77', '#003C8F', '#0057B8', '#1976D2', '#2196F3', '#64B5F6',
+  '#90CAF9', '#001F4D', '#4169E1', '#0047AB', '#120A8F', '#673AB7', '#8E24AA', '#AB47BC', '#CE93D8', '#E1BEE7',
+  '#4B0082', '#9966CC', '#5B2C83', '#4E2C1E', '#7B3F00', '#8B4513', '#A67B5B', '#AF6E4D', '#D2A679', '#E8C39E',
+  '#FFF1D0', '#4A251A', '#6B3E2E', '#8D5524', '#A97142', '#C68B59', '#D9A066', '#E8AD8A', '#F2C6A0', '#FFE0C2',
+  '#65743A', '#4F7942', '#9CAF88', '#98FF98', '#C08081', '#D8A0A6', '#C76B5A', '#B8860B', '#C0C0C0', '#A9B7C6'
 ];
+
+const skinToneColors = [];
+const detailPaletteColors = [];
 
 function hslToHex(hue, saturation, lightness) {
   const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
@@ -400,8 +521,9 @@ const paletteColors = [
 const state = {
   selectedCategory: 'Todos',
   search: '',
-  favorites: JSON.parse(localStorage.getItem('habia-vez-favorites') || '[]'),
-  progress: JSON.parse(localStorage.getItem('habia-vez-progress') || '{}'),
+  favorites: [],
+  progress: {},
+  purchases: [],
   currentReader: null,
   currentReaderIndex: 0,
   fontSize: 18,
@@ -425,6 +547,19 @@ const state = {
   currentVideoStoryId: null,
   currentVideoSource: null,
 };
+
+const localStateKey = 'habia-una-vez-state';
+
+function loadState() {
+  try {
+    const storedState = JSON.parse(localStorage.getItem(localStateKey) || '{}');
+    state.favorites = Array.isArray(storedState.favorites) ? storedState.favorites : [];
+    state.progress = storedState.progress && typeof storedState.progress === 'object' ? storedState.progress : {};
+    state.purchases = Array.isArray(storedState.purchases) ? storedState.purchases : [];
+  } catch (error) {
+    console.warn('No se pudo cargar el progreso local:', error);
+  }
+}
 
 function isAdmin() {
   return state.isAdmin;
@@ -471,20 +606,25 @@ function hsvToHex(hue, saturation, value) {
 }
 
 function saveState() {
-  localStorage.setItem('habia-vez-favorites', JSON.stringify(state.favorites));
-  localStorage.setItem('habia-vez-progress', JSON.stringify(state.progress));
+  try {
+    localStorage.setItem(localStateKey, JSON.stringify({
+      favorites: state.favorites,
+      progress: state.progress,
+      purchases: state.purchases,
+    }));
+  } catch (error) {
+    console.warn('No se pudo guardar el progreso local:', error);
+  }
+
+  if (supabaseClient) upsertUserProfile();
 }
 
 function saveCustomStories() {
-  localStorage.setItem(
-    'habia-vez-custom-stories',
-    JSON.stringify(stories.filter((story) => story.custom))
-  );
+  upsertUserProfile();
 }
 
 async function saveStoryVideos() {
   const storyVideos = Object.fromEntries(stories.filter((story) => story.video?.src).map((story) => [story.id, story.video]));
-  localStorage.setItem('habia-vez-story-videos', JSON.stringify(storyVideos));
   if (!supabaseClient) return;
 
   const videos = Object.entries(storyVideos).map(([storyId, video]) => ({
@@ -520,10 +660,7 @@ function deleteVideo(storyId) {
 }
 
 function saveCustomCharacters() {
-  localStorage.setItem(
-    'habia-vez-custom-characters',
-    JSON.stringify(characters.filter((character) => character.custom))
-  );
+  upsertUserProfile();
 }
 
 function readFileAsDataUrl(file) {
@@ -958,16 +1095,47 @@ function renderFavorites() {
     .join('');
 }
 
+function renderShop() {
+  const shopGrid = document.getElementById('shopGrid');
+  const shopSummary = document.getElementById('shopSummary');
+  const points = getCurrentPoints();
+
+  shopSummary.innerHTML = `
+    <span>🏆 Tus puntos: ${points}</span>
+    <span>🛍️ Inventario: ${state.purchases.length} artículos</span>
+  `;
+
+  shopGrid.innerHTML = shopItems.map((item) => {
+    const owned = state.purchases.includes(item.id);
+    const affordable = points >= item.price;
+    return `
+      <article class="shop-card">
+        <div class="shop-icon">${item.emoji}</div>
+        <div>
+          <h3>${item.name}</h3>
+          <p>${item.description}</p>
+        </div>
+        <div class="shop-meta">
+          <span class="shop-price">⭐ ${item.price}</span>
+          <button type="button" class="${owned ? 'is-owned' : ''}" data-action="buy-item" data-id="${item.id}" ${owned || !affordable ? 'disabled' : ''}>
+            ${owned ? 'Comprado' : 'Comprar'}
+          </button>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
 function renderAchievements() {
   const achievementsGrid = document.getElementById('achievementsGrid');
   const progress = state.progress;
-  const readStories = progress.readStories || 0;
+  const readStoryIds = progress.readStoryIds || [];
+  const readStories = readStoryIds.length || progress.readStories || 0;
   const listened = progress.listened || 0;
   const watched = progress.watched || 0;
   const activities = progress.activities || 0;
   const colored = progress.colored || 0;
   const points = readStories * 25 + listened * 15 + watched * 20 + activities * 30 + colored * 20;
-  const readStoryIds = progress.readStoryIds || [];
   const completedActivityIds = progress.completedActivityIds || [];
 
   const existingBadges = [
@@ -1104,6 +1272,19 @@ function generateColoringSvg(type, title) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+function completeStoryRead(storyId) {
+  const progress = state.progress;
+  progress.readStoryIds = progress.readStoryIds || [];
+  if (!progress.readStoryIds.includes(storyId)) {
+    progress.readStoryIds.push(storyId);
+    progress.readStories = progress.readStoryIds.length;
+    state.progress = progress;
+    saveState();
+    renderAchievements();
+    showToast('¡Historia completada! Has ganado puntos por leerla entera.');
+  }
+}
+
 function openReader(storyId) {
   const story = stories.find((item) => item.id === storyId);
   if (!story) return;
@@ -1116,16 +1297,6 @@ function openReader(storyId) {
   document.getElementById('readerCategory').textContent = story.category;
   document.getElementById('readerTitle').textContent = story.title;
   document.getElementById('readerCover').style.backgroundImage = `url('${story.cover}')`;
-
-  const progress = state.progress;
-  progress.readStoryIds = progress.readStoryIds || [];
-  if (!progress.readStoryIds.includes(storyId)) {
-    progress.readStoryIds.push(storyId);
-    progress.readStories = progress.readStoryIds.length;
-    state.progress = progress;
-    saveState();
-    renderAchievements();
-  }
 }
 
 function updateReaderDisplay() {
@@ -1516,7 +1687,6 @@ function openColorScene(sceneId) {
     .join('');
   palette.innerHTML = `
     <div class="palette-group">
-      <strong>40 colores vivos</strong>
       <div class="palette palette-main">${getColorButtons(mainPaletteColors)}</div>
     </div>
   `;
@@ -1633,12 +1803,73 @@ function saveCanvasAsImage() {
 
 function printCanvas() {
   const canvas = document.getElementById('colorCanvas');
-  const image = canvas.toDataURL('image/png');
-  const printWindow = window.open('', '_blank');
-  printWindow.document.write(`<img src="${image}" style="width:100%;max-width:800px;display:block;margin:20px auto;" />`);
-  printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
+  if (!canvas) return;
+
+  let exportCanvas = canvas;
+
+  if (state.baseCanvas && state.colorCanvas) {
+    exportCanvas = document.createElement('canvas');
+    exportCanvas.width = state.baseCanvas.width;
+    exportCanvas.height = state.baseCanvas.height;
+    const exportCtx = exportCanvas.getContext('2d');
+    exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+    exportCtx.drawImage(state.baseCanvas, 0, 0);
+    exportCtx.drawImage(state.colorCanvas, 0, 0);
+  }
+
+  const image = exportCanvas.toDataURL('image/png');
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.style.opacity = '0';
+  iframe.style.pointerEvents = 'none';
+  document.body.appendChild(iframe);
+
+  iframe.srcdoc = `
+    <!doctype html>
+    <html>
+      <head>
+        <title>Imprimir dibujo</title>
+        <style>
+          body {
+            margin: 0;
+            padding: 24px;
+            background: #fff;
+            display: grid;
+            place-items: center;
+            font-family: Arial, sans-serif;
+          }
+          img {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+          }
+        </style>
+      </head>
+      <body>
+        <img src="${image}" alt="Dibujo para imprimir" />
+      </body>
+    </html>
+  `;
+
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (error) {
+      showToast('No se pudo abrir la ventana de impresión. Intenta de nuevo.');
+    }
+
+    setTimeout(() => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }, 1200);
+  };
 }
 
 function clearCanvas() {
@@ -1744,6 +1975,26 @@ function setupEvents() {
       return;
     }
 
+    if (action === 'buy-item') {
+      const item = shopItems.find((entry) => entry.id === id);
+      if (!item) return;
+      const points = getCurrentPoints();
+      if (state.purchases.includes(item.id)) {
+        showToast('Este objeto ya lo tienes en tu inventario.');
+        return;
+      }
+      if (points < item.price) {
+        showToast('No tienes suficientes puntos para comprar este objeto.');
+        return;
+      }
+      state.purchases = [...state.purchases, item.id];
+      saveState();
+      renderShop();
+      renderAchievements();
+      showToast(`${item.name} comprado con éxito.`);
+      return;
+    }
+
     if (action === 'read') openReader(id);
     if (action === 'listen') openAudio(id);
     if (action === 'watch') openVideo(id);
@@ -1784,7 +2035,6 @@ function setupEvents() {
   document.getElementById('addStoryForm').addEventListener('submit', addCustomStory);
   document.getElementById('addVideoForm').addEventListener('submit', addVideoToStory);
   document.getElementById('addCharacterForm').addEventListener('submit', addCustomCharacter);
-  setupAuthentication();
 
   document.getElementById('decreaseFont').addEventListener('click', () => {
     state.fontSize = Math.max(14, state.fontSize - 2);
@@ -1810,6 +2060,8 @@ function setupEvents() {
       updateReaderDisplay();
       return;
     }
+
+    completeStoryRead(state.currentReader.id);
     document.getElementById('readerModal').classList.add('hidden');
   });
 
@@ -1966,7 +2218,7 @@ function setupEvents() {
   setActiveTab(document.querySelector(`[data-tab-target="${initialTab}"]`) ? initialTab : 'home');
 }
 
-function setupAuthentication() {
+async function setupAuthentication() {
   const loginButton = document.getElementById('googleLoginBtn');
   const logoutButton = document.getElementById('logoutBtn');
   const authButton = document.getElementById('authButton');
@@ -2070,20 +2322,40 @@ function setupAuthentication() {
     if (error && authStatus) authStatus.textContent = error.message;
   });
 
-  supabaseClient.auth.getSession().then(async ({ data, error }) => {
+  try {
+    const { data, error } = await supabaseClient.auth.getSession();
+    console.log('Diagnóstico auth: getSession()', { session: data?.session, error });
     if (error) {
       if (authStatus) authStatus.textContent = `No se pudo leer la sesión: ${error.message}`;
       return;
     }
     updateAuthUi(data.session);
-    if (!data.session) return;
+    if (!data.session) {
+      if (authStatus) authStatus.textContent = 'No hay sesión activa. Revisa Auth de Supabase y la URL local (http://localhost).';
+      return;
+    }
     const { data: userData, error: userError } = await supabaseClient.auth.getUser();
+    console.log('Diagnóstico auth: getUser()', { userData, userError });
     if (userError && authStatus) authStatus.textContent = `No se pudo leer el usuario: ${userError.message}`;
-    if (userData.user) updateAuthUi({ user: userData.user });
-  }).catch((error) => {
+    if (userData.user) {
+      updateAuthUi({ user: userData.user });
+      await loadUserProfile();
+      renderFavorites();
+      renderAchievements();
+    }
+  } catch (error) {
+    console.error('Diagnóstico auth: error general', error);
     if (authStatus) authStatus.textContent = `Error de autenticación: ${error.message}`;
+  }
+
+  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+    updateAuthUi(session);
+    if (session?.user) {
+      await loadUserProfile();
+      renderFavorites();
+      renderAchievements();
+    }
   });
-  supabaseClient.auth.onAuthStateChange((_event, session) => updateAuthUi(session));
 }
 
 function toggleFavorite(storyId) {
@@ -2096,6 +2368,8 @@ function toggleFavorite(storyId) {
 }
 
 async function initialize() {
+  loadState();
+
   try {
     await loadStoriesFromFiles();
   } catch (error) {
@@ -2113,8 +2387,10 @@ async function initialize() {
   renderCharacters();
   renderValues();
   renderFavorites();
+  renderShop();
   renderAchievements();
   setupEvents();
+  await setupAuthentication();
 }
 
 initialize();

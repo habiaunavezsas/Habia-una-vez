@@ -913,6 +913,82 @@ main {
   opacity: 1;
 }
 
+.shop-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(243, 201, 105, 0.18), rgba(105, 185, 187, 0.16));
+  border: 1px solid rgba(23, 59, 67, 0.08);
+  color: var(--navy);
+  font-weight: 700;
+}
+
+.shop-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(23, 59, 67, 0.08);
+  box-shadow: var(--card-shadow);
+}
+
+.shop-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: rgba(125, 103, 255, 0.1);
+  font-size: 2rem;
+}
+
+.shop-card h3 {
+  margin: 0;
+  font-size: 1.06rem;
+  color: var(--navy);
+}
+
+.shop-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.shop-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.shop-price {
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.shop-card button {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #7d67ff, #5aa6d9);
+  color: var(--white);
+  font-weight: 700;
+}
+
+.shop-card button.is-owned {
+  background: linear-gradient(135deg, #2e9b62, #4ebd76);
+}
+
+.shop-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .story-body {
   padding: 16px 18px 16px;
   display: flex;
@@ -1751,6 +1827,7 @@ main {
   display: grid;
   grid-template-columns: repeat(20, minmax(0, 1fr));
   gap: 8px;
+  width: 100%;
 }
 
 .more-colors-btn {

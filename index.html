@@ -32,6 +32,7 @@
             <button type="button" data-tab-target="coloring" aria-label="Colorear" title="Colorear"><span>🎨</span> Colorear</button>
             <button type="button" data-tab-target="characters" aria-label="Personajes" title="Personajes"><span>🧚</span> Personajes</button>
             <button type="button" data-tab-target="favorites" aria-label="Favoritos" title="Favoritos"><span>⭐</span> Favoritos</button>
+            <button type="button" data-tab-target="shop" aria-label="Tienda" title="Tienda"><span>🛍️</span> Tienda</button>
             <button type="button" data-tab-target="achievements" aria-label="Logros" title="Logros"><span>🏆</span> Logros</button>
           </div>
         </details>
@@ -96,6 +97,7 @@
           <button class="home-menu-btn menu-blue" data-tab-target="coloring"><span>🎨</span><strong>Colorea</strong><small>Crea tu propia escena</small></button>
           <button class="home-menu-btn menu-lilac" data-tab-target="characters"><span>🧚</span><strong>Personajes</strong><small>Conoce a tus amigos</small></button>
           <button class="home-menu-btn menu-gold" data-tab-target="favorites"><span>⭐</span><strong>Favoritos</strong><small>Revisa tus cuentos</small></button>
+          <button class="home-menu-btn menu-lilac" data-tab-target="shop"><span>🛍️</span><strong>Tienda</strong><small>Canjea tus puntos</small></button>
           <button class="home-menu-btn menu-teal" data-tab-target="achievements"><span>🏆</span><strong>Logros</strong><small>Mira tus avances</small></button>
         </div>
       </section>
@@ -163,6 +165,16 @@
           <button class="back-home-btn" data-tab-target="home">🏠 Inicio</button>
         </div>
         <div id="valuesGrid" class="values-grid"></div>
+      </section>
+
+      <section id="shop" class="section-block" data-tab-section="shop">
+        <div class="section-header">
+          <h2>🛍️ Tienda de magia</h2>
+          <p>Usa tus puntos para comprar objetos y personalizar tu biblioteca.</p>
+          <button class="back-home-btn" data-tab-target="home">🏠 Inicio</button>
+        </div>
+        <div id="shopSummary" class="shop-summary"></div>
+        <div id="shopGrid" class="shop-grid"></div>
       </section>
 
       <section id="favorites" class="section-block" data-tab-section="favorites">
