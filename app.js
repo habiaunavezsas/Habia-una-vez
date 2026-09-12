@@ -2554,7 +2554,6 @@ async function initialize() {
   renderCharacters();
   renderValues();
   renderFavorites();
-  renderShop();
   renderAchievements();
   setupEvents();
   await setupAuthentication();
