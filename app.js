@@ -275,6 +275,31 @@ async function upsertUserProfile() {
   }
 }
 
+let profileSaveQueue = Promise.resolve();
+
+function queueUserProfileSave() {
+  if (!supabaseClient) return;
+  profileSaveQueue = profileSaveQueue
+    .catch(() => {})
+    .then(() => upsertUserProfile());
+}
+
+function mergeProgress(remoteProgress, localProgress) {
+  const merged = { ...remoteProgress, ...localProgress };
+  const numericKeys = ['readStories', 'listened', 'watched', 'activities', 'colored'];
+  numericKeys.forEach((key) => {
+    merged[key] = Math.max(Number(remoteProgress[key] || 0), Number(localProgress[key] || 0));
+  });
+  ['readStoryIds', 'completedActivityIds'].forEach((key) => {
+    merged[key] = [...new Set([
+      ...(Array.isArray(remoteProgress[key]) ? remoteProgress[key] : []),
+      ...(Array.isArray(localProgress[key]) ? localProgress[key] : []),
+    ])];
+  });
+  merged.readStories = Math.max(merged.readStories, merged.readStoryIds.length);
+  return merged;
+}
+
 async function loadUserProfile() {
   if (!supabaseClient) return;
   const userId = await ensureUserProfile();
@@ -293,8 +318,10 @@ async function loadUserProfile() {
 
   if (!data) return;
 
-  state.favorites = Array.isArray(data.favorites) ? data.favorites : [];
-  state.progress = data.progress && typeof data.progress === 'object' ? data.progress : {};
+  const remoteFavorites = Array.isArray(data.favorites) ? data.favorites : [];
+  const remoteProgress = data.progress && typeof data.progress === 'object' ? data.progress : {};
+  state.favorites = [...new Set([...remoteFavorites, ...state.favorites])];
+  state.progress = mergeProgress(remoteProgress, state.progress || {});
   state.purchases = Array.isArray(data.purchases) ? data.purchases : [];
 
   const customStories = Array.isArray(data.custom_stories) ? data.custom_stories : [];
@@ -302,6 +329,7 @@ async function loadUserProfile() {
 
   stories = [...stories.filter((story) => !story.custom), ...customStories];
   characters = [...defaultCharacters, ...customCharacters];
+  queueUserProfileSave();
 }
 
 function getStoryCategories(story) {
@@ -531,6 +559,8 @@ const state = {
   audioUtterance: null,
   audioPageOffsets: [],
   activeAudioWord: -1,
+  audioSession: 0,
+  audioHighlightTimer: null,
   audioRate: 0.9,
   currentScene: null,
   activeColor: '#ff5d8f',
@@ -616,11 +646,11 @@ function saveState() {
     console.warn('No se pudo guardar el progreso local:', error);
   }
 
-  if (supabaseClient) upsertUserProfile();
+  queueUserProfileSave();
 }
 
 function saveCustomStories() {
-  upsertUserProfile();
+  queueUserProfileSave();
 }
 
 async function saveStoryVideos() {
@@ -660,7 +690,7 @@ function deleteVideo(storyId) {
 }
 
 function saveCustomCharacters() {
-  upsertUserProfile();
+  queueUserProfileSave();
 }
 
 function readFileAsDataUrl(file) {
@@ -1370,9 +1400,89 @@ function chooseKidFriendlyVoice() {
   return preferred;
 }
 
+function clearAudioHighlightTimer() {
+  if (state.audioHighlightTimer) {
+    window.clearInterval(state.audioHighlightTimer);
+    state.audioHighlightTimer = null;
+  }
+}
+
+function speakReaderPage(pageIndex, sessionId) {
+  const story = state.currentReader;
+  if (!story || sessionId !== state.audioSession) return;
+
+  if (pageIndex >= story.pages.length) {
+    state.audioUtterance = null;
+    state.activeAudioWord = -1;
+    state.audioPageOffsets = [];
+    document.getElementById('audioStatus').textContent = 'Audio finalizado.';
+    updateReaderDisplay();
+    return;
+  }
+
+  const pageText = story.pages[pageIndex].text;
+  const words = pageText.trim().split(/\s+/).filter(Boolean);
+  state.currentReaderIndex = pageIndex;
+  state.activeAudioWord = 0;
+  updateReaderDisplay();
+
+  const utterance = new SpeechSynthesisUtterance(pageText);
+  const kidVoice = chooseKidFriendlyVoice();
+  if (kidVoice) {
+    utterance.voice = kidVoice;
+    utterance.lang = kidVoice.lang || 'es-ES';
+  }
+  utterance.rate = state.audioRate;
+  utterance.pitch = 1.2;
+  utterance.volume = Number(document.getElementById('audioVolume').value);
+
+  let receivedBoundary = false;
+  let fallbackWord = 0;
+  const wordDelay = Math.max(180, 60000 / Math.max(60, state.audioRate * 150));
+  state.audioHighlightTimer = window.setInterval(() => {
+    if (receivedBoundary || sessionId !== state.audioSession) return;
+    fallbackWord = Math.min(fallbackWord + 1, Math.max(0, words.length - 1));
+    state.activeAudioWord = fallbackWord;
+    updateReaderDisplay();
+  }, wordDelay);
+
+  utterance.onstart = () => {
+    document.getElementById('audioStatus').textContent = `Leyendo página ${pageIndex + 1}...`;
+  };
+  utterance.onboundary = (event) => {
+    if (sessionId !== state.audioSession || typeof event.charIndex !== 'number') return;
+    receivedBoundary = true;
+    const activeWord = pageText.slice(0, event.charIndex).trim().split(/\s+/).filter(Boolean).length;
+    state.activeAudioWord = Math.min(activeWord, Math.max(0, words.length - 1));
+    updateReaderDisplay();
+  };
+  utterance.onend = () => {
+    clearAudioHighlightTimer();
+    if (sessionId === state.audioSession) speakReaderPage(pageIndex + 1, sessionId);
+  };
+  utterance.onerror = () => {
+    clearAudioHighlightTimer();
+    if (sessionId === state.audioSession) {
+      state.audioUtterance = null;
+      document.getElementById('audioStatus').textContent = 'No se pudo reproducir el audio.';
+    }
+  };
+
+  state.audioUtterance = utterance;
+  window.speechSynthesis.speak(utterance);
+}
+
 function speakText() {
   if (!('speechSynthesis' in window)) {
     showToast('Tu navegador no soporta audio narrado.');
+    return;
+  }
+
+  if (state.currentReader && state.audioPageOffsets.length) {
+    state.audioSession += 1;
+    clearAudioHighlightTimer();
+    window.speechSynthesis.cancel();
+    speakReaderPage(0, state.audioSession);
     return;
   }
 
@@ -1387,25 +1497,6 @@ function speakText() {
   utterance.volume = Number(document.getElementById('audioVolume').value);
   utterance.onstart = () => {
     document.getElementById('audioStatus').textContent = 'Reproduciendo audio...';
-  };
-  utterance.onboundary = (event) => {
-    if (typeof event.charIndex !== 'number') return;
-
-    if (!state.audioPageOffsets.length || !state.currentReader) return;
-    const pageIndex = state.audioPageOffsets.findIndex((offset, index) => {
-      const nextOffset = state.audioPageOffsets[index + 1] ?? state.audioText.length;
-      return event.charIndex >= offset && event.charIndex < nextOffset;
-    });
-    if (pageIndex < 0) return;
-    const pageStart = state.audioPageOffsets[pageIndex];
-    const localText = state.currentReader.pages[pageIndex].text;
-    const localIndex = Math.max(0, event.charIndex - pageStart);
-    const activeWord = localText.slice(0, localIndex).trim().split(/\s+/).filter(Boolean).length;
-    if (state.currentReaderIndex !== pageIndex || state.activeAudioWord !== activeWord) {
-      state.currentReaderIndex = pageIndex;
-      state.activeAudioWord = activeWord;
-      updateReaderDisplay();
-    }
   };
   utterance.onend = () => {
     document.getElementById('audioStatus').textContent = 'Audio finalizado.';
@@ -1422,8 +1513,12 @@ function speakText() {
 function stopAudioPlayback() {
   if (!('speechSynthesis' in window)) return;
 
+  state.audioSession += 1;
+  clearAudioHighlightTimer();
   window.speechSynthesis.cancel();
   state.audioUtterance = null;
+  state.activeAudioWord = -1;
+  state.audioPageOffsets = [];
   if (document.getElementById('audioStatus')) {
     document.getElementById('audioStatus').textContent = 'Audio detenido.';
   }
@@ -2048,6 +2143,7 @@ function setupEvents() {
 
   document.getElementById('prevPageBtn').addEventListener('click', () => {
     if (state.currentReaderIndex > 0) {
+      stopAudioPlayback();
       state.currentReaderIndex -= 1;
       updateReaderDisplay();
     }
@@ -2056,6 +2152,7 @@ function setupEvents() {
   document.getElementById('nextPageBtn').addEventListener('click', () => {
     if (!state.currentReader) return;
     if (state.currentReaderIndex < state.currentReader.pages.length - 1) {
+      stopAudioPlayback();
       state.currentReaderIndex += 1;
       updateReaderDisplay();
       return;
@@ -2064,6 +2161,24 @@ function setupEvents() {
     completeStoryRead(state.currentReader.id);
     document.getElementById('readerModal').classList.add('hidden');
   });
+
+  const readerPage = document.getElementById('readerPage');
+  let readerTouchStartX = 0;
+  let readerTouchStartY = 0;
+  readerPage.addEventListener('touchstart', (event) => {
+    const touch = event.changedTouches[0];
+    readerTouchStartX = touch.clientX;
+    readerTouchStartY = touch.clientY;
+  }, { passive: true });
+  readerPage.addEventListener('touchend', (event) => {
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - readerTouchStartX;
+    const deltaY = touch.clientY - readerTouchStartY;
+    if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.3) return;
+    event.preventDefault();
+    if (deltaX < 0) document.getElementById('nextPageBtn').click();
+    else document.getElementById('prevPageBtn').click();
+  }, { passive: false });
 
   document.getElementById('readAudioBtn').addEventListener('click', () => {
     if (state.currentReader) {
@@ -2074,6 +2189,7 @@ function setupEvents() {
         return pageOffset;
       });
       state.audioText = state.currentReader.pages.map((page) => page.text).join(' ');
+      state.activeAudioWord = -1;
       speakText();
     }
   });
