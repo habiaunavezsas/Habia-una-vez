@@ -261,6 +261,8 @@ async function upsertUserProfile() {
 
   const payload = {
     user_id: userId,
+    favorites: state.favorites,
+    progress: state.progress,
     purchases: state.purchases,
     custom_stories: stories.filter((story) => story.custom),
     custom_characters: characters.filter((character) => character.custom),
@@ -275,6 +277,7 @@ async function upsertUserProfile() {
 
 let profileSaveQueue = Promise.resolve();
 let librarySaveQueue = Promise.resolve();
+let storyVideoSaveQueue = Promise.resolve();
 
 function queueUserProfileSave() {
   if (!supabaseClient) return;
@@ -704,8 +707,13 @@ async function saveStoryVideos() {
     description: video.description,
     custom: Boolean(video.custom),
   }));
-  const { error } = await supabaseClient.from('story_videos').upsert(videos, { onConflict: 'story_id' });
-  if (error) showToast(`No se pudo guardar el video en la base de datos: ${error.message}`);
+  storyVideoSaveQueue = storyVideoSaveQueue
+    .catch(() => {})
+    .then(async () => {
+      const { error } = await supabaseClient.from('story_videos').upsert(videos, { onConflict: 'story_id' });
+      if (error) showToast(`No se pudo guardar el video en la base de datos: ${error.message}`);
+    });
+  return storyVideoSaveQueue;
 }
 
 function renderDeleteVideosMenu() {
@@ -716,13 +724,21 @@ function renderDeleteVideosMenu() {
     : '<p class="empty-state">No hay videos guardados.</p>';
 }
 
-function deleteVideo(storyId) {
+async function deleteVideo(storyId) {
   if (!isAdmin()) return;
   const story = stories.find((item) => item.id === storyId && item.video?.src);
   if (!story || !window.confirm(`¿Eliminar el video de "${story.title}"?`)) return;
   story.video = { title: story.title, src: '', description: `Video de ${story.title}.` };
-  saveStoryVideos();
-  supabaseClient?.from('story_videos').delete().eq('story_id', storyId);
+  delete remoteStoryVideos[storyId];
+  if (supabaseClient) {
+    storyVideoSaveQueue = storyVideoSaveQueue
+      .catch(() => {})
+      .then(async () => {
+        const { error } = await supabaseClient.from('story_videos').delete().eq('story_id', storyId);
+        if (error) showToast(`No se pudo eliminar el video de la base de datos: ${error.message}`);
+      });
+    await storyVideoSaveQueue;
+  }
   saveCustomStories();
   renderVideos();
   renderDeleteVideosMenu();
