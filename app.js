@@ -205,6 +205,24 @@ function createStoryQuiz(title, paragraphs) {
   });
 }
 
+function parseQuestionsMarkdown(markdown) {
+  const storySections = [...markdown.matchAll(/^#{1,2}\s+\d+\.\s+(.+)$/gm)];
+  return storySections.map((section, sectionIndex) => {
+    const sectionStart = section.index + section[0].length;
+    const sectionEnd = storySections[sectionIndex + 1]?.index || markdown.length;
+    const sectionText = markdown.slice(sectionStart, sectionEnd);
+    return [...sectionText.matchAll(/\*\*(\d+)\.\s+(.+?)\*\*\s*\n([\s\S]*?)\*\*Respuesta:\s*([A-D])\*\*/g)].map((match) => {
+      const options = [...match[3].matchAll(/^[A-D]\)\s+(.+)$/gm)].map((option) => option[1].trim());
+      const answerIndex = match[4].charCodeAt(0) - 'A'.charCodeAt(0);
+      return {
+        question: match[2].trim(),
+        options,
+        answer: options[answerIndex] || options[0],
+      };
+    });
+  });
+}
+
 let stories = [];
 let storedStoryVideos = {};
 let storedCustomStories = [];
@@ -379,6 +397,14 @@ function getStoryCategories(story) {
 }
 
 async function loadStoriesFromFiles() {
+  let questionSets = [];
+  try {
+    const questionsResponse = await fetch('assets/Preguntas/Preguntas-y-respuestas-cuentos.md');
+    if (questionsResponse.ok) questionSets = parseQuestionsMarkdown(await questionsResponse.text());
+  } catch (error) {
+    console.warn('No se pudieron cargar las preguntas de los cuentos:', error);
+  }
+
   if (supabaseClient) {
     const { data, error } = await supabaseClient
       .from('story_videos')
@@ -389,7 +415,7 @@ async function loadStoriesFromFiles() {
   }
 
   const loadedStories = await Promise.all(
-    storyFiles.map(async (fileName) => {
+    storyFiles.map(async (fileName, storyIndex) => {
       const response = await fetch(`assets/cuentos/${fileName}`);
       if (!response.ok) throw new Error(`No se pudo cargar ${fileName}`);
       const markdown = await response.text();
@@ -444,7 +470,7 @@ async function loadStoriesFromFiles() {
         description: synopsis,
         cover,
         pages: paragraphs.map((text, index) => ({ title: `Página ${index + 1}`, text, image: cover })),
-        quiz: createStoryQuiz(title, paragraphs),
+        quiz: questionSets[storyIndex]?.length ? questionSets[storyIndex] : createStoryQuiz(title, paragraphs),
         video: remoteStoryVideos[fileName.replace('.md', '')]
           || storedStoryVideos[fileName.replace('.md', '')]
           || { title, src: '', description: `Video de ${title}.` },
@@ -1832,6 +1858,33 @@ function renderWordSearch(story) {
   `;
 }
 
+function renderQuizQuestion(story) {
+  const game = state.activityGame;
+  const quizQuestion = game.questions[game.currentIndex];
+  if (!quizQuestion) return;
+
+  document.getElementById('activityGame').innerHTML = `
+    <p class="activity-prompt">Pregunta ${game.currentIndex + 1} de ${game.questions.length}</p>
+    <div class="question-box">
+      <h4>${quizQuestion.question}</h4>
+      <div class="quiz-options">
+        ${quizQuestion.options.map((option, optionIndex) => `<button type="button" data-quiz-option="${optionIndex}">${String.fromCharCode(65 + optionIndex)}) ${option}</button>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderQuiz(story) {
+  state.activityGame = {
+    type: 'quiz',
+    storyId: story.id,
+    questions: story.quiz,
+    currentIndex: 0,
+    score: 0,
+  };
+  renderQuizQuestion(story);
+}
+
 function openColorScene(sceneId) {
   const scene = coloringScenes.find((item) => item.id === sceneId);
   if (!scene) return;
@@ -2066,8 +2119,50 @@ function setupEvents() {
       const story = stories.find((item) => item.id === state.activityStoryId);
       if (story) {
         document.getElementById('activityChoices').classList.add('hidden');
-        renderWordSearch(story);
+        if (activityTypeButton.dataset.activityType === 'quiz') renderQuiz(story);
+        else renderWordSearch(story);
       }
+      return;
+    }
+
+    const quizOption = event.target.closest('[data-quiz-option]');
+    if (quizOption && state.activityGame?.type === 'quiz') {
+      const game = state.activityGame;
+      const story = stories.find((item) => item.id === game.storyId);
+      const question = game.questions[game.currentIndex];
+      const selectedOption = question.options[Number(quizOption.dataset.quizOption)];
+      const optionButtons = document.querySelectorAll('[data-quiz-option]');
+      optionButtons.forEach((button) => { button.disabled = true; });
+      optionButtons.forEach((button) => {
+        const option = question.options[Number(button.dataset.quizOption)];
+        button.classList.toggle('is-correct', option === question.answer);
+        button.classList.toggle('is-wrong', option === selectedOption && option !== question.answer);
+      });
+      if (selectedOption === question.answer) game.score += 1;
+      const isLastQuestion = game.currentIndex === game.questions.length - 1;
+      document.getElementById('activityResult').textContent = selectedOption === question.answer ? '¡Correcto! 🌟' : `La respuesta correcta es: ${question.answer}`;
+      const nextLabel = isLastQuestion ? 'Ver resultado' : 'Siguiente pregunta';
+      document.getElementById('activityGame').insertAdjacentHTML('beforeend', `<button type="button" class="primary-btn quiz-next" data-quiz-next>${nextLabel}</button>`);
+      return;
+    }
+
+    const quizNext = event.target.closest('[data-quiz-next]');
+    if (quizNext && state.activityGame?.type === 'quiz') {
+      const game = state.activityGame;
+      if (game.currentIndex < game.questions.length - 1) {
+        game.currentIndex += 1;
+        document.getElementById('activityResult').textContent = '';
+        renderQuizQuestion(stories.find((story) => story.id === game.storyId));
+      } else {
+        document.getElementById('activityGame').innerHTML = `<p class="activity-prompt">Has conseguido ${game.score} de ${game.questions.length} respuestas correctas.</p>`;
+        document.getElementById('activityResult').textContent = game.score === game.questions.length ? '¡Perfecto! 🌟' : '¡Buen trabajo! Puedes volver a intentarlo.';
+        document.getElementById('completeActivityBtn').classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (event.target.closest('#completeActivityBtn')) {
+      completeActivity(state.activityStoryId);
       return;
     }
 

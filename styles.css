@@ -1802,6 +1802,39 @@ main {
   font-weight: 700;
 }
 
+.quiz-options {
+  display: grid;
+  gap: 8px;
+}
+
+.quiz-options button {
+  padding: 10px 12px;
+  border: 1px solid rgba(122, 99, 255, 0.18);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--navy);
+  text-align: left;
+}
+
+.quiz-options button.is-correct {
+  background: #dcfce7;
+  border-color: #22c55e;
+}
+
+.quiz-options button.is-wrong {
+  background: #fee2e2;
+  border-color: #ef4444;
+}
+
+.quiz-options button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.quiz-next {
+  margin-top: 12px;
+}
+
 .activity-prompt {
   color: var(--navy);
   font-weight: 700;
